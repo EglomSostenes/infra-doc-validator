@@ -1,0 +1,12 @@
+# Ignora arquivos de ambiente (onde ficam as senhas e chaves)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Ignora arquivos de ambiente específicos do docker se existirem
+.env.*.local
+
+# Caso você use o docker-compose para carregar arquivos .env específicos
+*.env

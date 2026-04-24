@@ -1,0 +1,90 @@
+{
+  "users": [
+    {
+      "name": "doc_validator",
+      "password": "senha123",
+      "tags": "administrator"
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "doc_validator",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "doc_validator.events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "doc_validator.main_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "doc_validator.events",
+        "x-dead-letter-routing-key": "doc_validator.retry"
+      }
+    },
+    {
+      "name": "doc_validator.retry_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "doc_validator.events",
+        "x-dead-letter-routing-key": "document.retry",
+        "x-message-ttl": 30000
+      }
+    },
+    {
+      "name": "doc_validator.dead_letter_queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "doc_validator.events",
+      "vhost": "/",
+      "destination": "doc_validator.main_queue",
+      "destination_type": "queue",
+      "routing_key": "document.#",
+      "arguments": {}
+    },
+    {
+      "source": "doc_validator.events",
+      "vhost": "/",
+      "destination": "doc_validator.retry_queue",
+      "destination_type": "queue",
+      "routing_key": "doc_validator.retry",
+      "arguments": {}
+    },
+    {
+      "source": "doc_validator.events",
+      "vhost": "/",
+      "destination": "doc_validator.dead_letter_queue",
+      "destination_type": "queue",
+      "routing_key": "document.dead_letter",
+      "arguments": {}
+    }
+  ]
+}
