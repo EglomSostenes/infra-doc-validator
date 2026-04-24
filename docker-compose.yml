@@ -22,20 +22,28 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     hostname: rabbit-doc-validator-server
+
     environment:
-      # Instrução direta para carregar o arquivo que contém TUDO (incluindo o usuário)
-      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/init.sh:/init.sh:ro
       - ./definitions.json:/etc/rabbitmq/definitions.json:ro
+
+    entrypoint: ["/init.sh"]
+
     ports:
       - "5672:5672"
       - "15672:15672"
+
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+
     networks:
       - infra-net
 
@@ -87,4 +95,4 @@ networks:
     name: local-infra-net
     driver: bridge
     attachable: true
-    
+
