@@ -2,6 +2,8 @@
 # ==============================================================================
 # setup.sh — Doc-Validator Full Stack Bootstrap
 # Sobe Infra Base → Rails → Go Relay garantindo healthchecks e ordem correta.
+# 
+# VERSÃO: 2.0.0 (com Observabilidade - Grafana/Loki)
 # ==============================================================================
 set -euo pipefail
 
@@ -45,7 +47,7 @@ log_info()    { echo -e "${GRAY}[$(_ts)]${NC} ${CYAN}${BOLD}[INFO]${NC}  $*";  _
 log_ok()      { echo -e "${GRAY}[$(_ts)]${NC} ${GREEN}${BOLD}[ OK ]${NC}  $*"; _log_raw "[ OK ]  $*"; }
 log_warn()    { echo -e "${GRAY}[$(_ts)]${NC} ${YELLOW}${BOLD}[WARN]${NC}  $*"; _log_raw "[WARN]  $*"; }
 log_error()   { echo -e "${GRAY}[$(_ts)]${NC} ${RED}${BOLD}[ERR ]${NC}  $*";   _log_raw "[ERR ]  $*"; }
-log_debug()   { _log_raw "[DEBG]  $*"; }  # só no arquivo, não polui terminal
+log_debug()   { _log_raw "[DEBG]  $*"; }
 log_section() { echo -e "\n${BOLD}${CYAN}━━━  $*  ━━━${NC}"; _log_raw "======  $*  ======"; }
 log_step()    { echo -e "  ${BOLD}▸${NC} $*"; _log_raw "  >> $*"; CURRENT_STEP="$*"; }
 die()         { log_error "$*"; exit 1; }
@@ -67,6 +69,7 @@ on_error() {
   echo -e "  📦 Logs da infra: ${BOLD}docker compose -f infra-doc-validator/docker-compose.yml logs --tail=50${NC}"
   echo -e "  💎 Logs do Rails: ${BOLD}docker compose -f rails-doc-validator/docker-compose-rails-infra.yml logs --tail=50 web${NC}"
   echo -e "  🐹 Logs do Relay: ${BOLD}docker compose -f go-relay/docker-compose-go-infra.yml logs --tail=50${NC}"
+  echo -e "  📊 Logs do Grafana: ${BOLD}docker compose -f infra-doc-validator/docker-compose.yml logs grafana --tail=30${NC}"
   echo ""
   _log_raw "SETUP ABORTADO — etapa: $CURRENT_STEP | linha: $line_number | código: $exit_code"
 }
@@ -124,6 +127,21 @@ ensure_env() {
     log_warn "Revise as variáveis em $env_file antes de usar em produção."
   else
     die "Nem .env nem .env.example encontrados em '$dir'. Crie o arquivo manualmente."
+  fi
+}
+
+# ──────────────────────────────────────────────
+# VERIFICAR REDE COMPARTILHADA (não criar)
+# ──────────────────────────────────────────────
+ensure_network() {
+  log_step "Verificando rede compartilhada local-infra-net"
+  
+  if docker network inspect local-infra-net >/dev/null 2>&1; then
+    log_ok "Rede local-infra-net já existe"
+  else
+    log_info "Rede local-infra-net não encontrada. Criando..."
+    docker network create local-infra-net
+    log_ok "Rede local-infra-net criada"
   fi
 }
 
@@ -376,10 +394,6 @@ wait_for_running() {
 
 # ──────────────────────────────────────────────
 # AGUARDA RAILS ESTAR REALMENTE PRONTO
-#
-# Probe via ActiveRecord: só avança quando Rails carregou o ambiente inteiro
-# E consegue conectar ao Postgres. Elimina sleep cego e garante que
-# db:migrate não vai competir com nenhuma inicialização em andamento.
 # ──────────────────────────────────────────────
 wait_for_rails_ready() {
   local compose_file="$1"
@@ -450,6 +464,52 @@ exec_in_container() {
 }
 
 # ──────────────────────────────────────────────
+# VERIFICA OBSERVABILIDADE
+# ──────────────────────────────────────────────
+verify_observability() {
+  log_section "Verificando Stack de Observabilidade"
+  
+  # Carregar variáveis do .env para obter senha do Grafana
+  if [ -f "$SCRIPT_DIR/infra-doc-validator/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/infra-doc-validator/.env"
+    set +a
+  fi
+  
+  # Verificar se Loki está respondendo
+  if curl -s -f http://localhost:3100/ready >/dev/null 2>&1; then
+    log_ok "Loki API está respondendo"
+    
+    # Aguardar alguns logs
+    sleep 5
+    
+    # Verificar se logs do relay estão chegando
+    local log_count
+    log_count=$(curl -s -G 'http://localhost:3100/loki/api/v1/query' \
+      --data-urlencode 'query={container=~".*relay.*"}' \
+      | jq '.data.result | length' 2>/dev/null || echo "0")
+    
+    if [ "$log_count" -gt 0 ]; then
+      log_ok "✅ Logs do Relay estão sendo coletados ($log_count entradas encontradas)"
+    else
+      log_warn "⚠️ Nenhum log do Relay encontrado ainda. O Promtail pode levar alguns segundos para coletar."
+    fi
+  else
+    log_warn "⚠️ Loki não está disponível. Verifique se os serviços de observabilidade subiram corretamente."
+  fi
+  
+  # Verificar se Grafana está acessível
+  if curl -s -f http://localhost:3030/api/health >/dev/null 2>&1; then
+    log_ok "✅ Grafana está disponível em http://localhost:3030"
+    log_info "   Login: admin / ${GRAFANA_PASSWORD:-DocValidator2024!}"
+    log_info "   Dashboard: Go Relay - Outbox Monitor"
+  else
+    log_warn "⚠️ Grafana não está respondendo em http://localhost:3030"
+    log_info "   Verifique: docker compose -f infra-doc-validator/docker-compose.yml logs grafana"
+  fi
+}
+
+# ──────────────────────────────────────────────
 # RESUMO FINAL
 # ──────────────────────────────────────────────
 print_summary() {
@@ -459,15 +519,33 @@ print_summary() {
   mins=$(( duration / 60 ))
   secs=$(( duration % 60 ))
 
-  echo -e "\n${GREEN}${BOLD}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}${BOLD}║   🎉  Doc-Validator está no ar!              ║${NC}"
-  echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════╝${NC}"
-  echo -e "  ${BOLD}📍 Nginx (HTTPS):${NC}      https://localhost"
-  echo -e "  ${BOLD}📍 Rails (direto):${NC}     http://localhost:3000"
-  echo -e "  ${BOLD}📍 MinIO Console:${NC}      http://localhost:9001"
-  echo -e "  ${BOLD}📍 RabbitMQ Mgmt:${NC}      http://localhost:15672"
-  echo -e "  ${BOLD}📍 Postgres:${NC}           localhost:5432"
-  echo -e "\n  ${GRAY}⏱  Tempo total: ${mins}m ${secs}s${NC}"
+  echo -e "\n${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}${BOLD}║   🎉  Doc-Validator está no ar!                                   ║${NC}"
+  echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}📍 Aplicações:${NC}"
+  echo -e "     Nginx (HTTPS):      https://localhost"
+  echo -e "     Rails (direto):     http://localhost:3000"
+  echo -e "     MinIO Console:      http://localhost:9001"
+  echo -e "     RabbitMQ Mgmt:      http://localhost:15672"
+  echo -e "     Postgres:           localhost:5432"
+  echo ""
+  echo -e "  ${BOLD}📊 Observabilidade:${NC}"
+  if curl -s -f http://localhost:3030/api/health >/dev/null 2>&1; then
+    echo -e "     Grafana:            http://localhost:3030"
+    echo -e "     Login:              admin / ${GRAFANA_PASSWORD:-DocValidator2024!}"
+    echo -e "     Dashboard:          Go Relay - Outbox Monitor"
+  else
+    echo -e "     Grafana:            ${YELLOW}Não disponível (verifique logs)${NC}"
+  fi
+  echo -e "     Loki API:           http://localhost:3100"
+  echo ""
+  echo -e "  ${BOLD}🔧 Comandos úteis:${NC}"
+  echo -e "     Ver logs do Relay:  docker compose -f go-relay/docker-compose-go-infra.yml logs -f relay"
+  echo -e "     Ver logs do Loki:   docker compose -f infra-doc-validator/docker-compose.yml logs -f loki"
+  echo -e "     Dashboard direto:   open http://localhost:3030"
+  echo ""
+  echo -e "  ${GRAY}⏱  Tempo total: ${mins}m ${secs}s${NC}"
   echo -e "  ${GRAY}📋 Log completo: $LOG_FILE${NC}"
   echo ""
   _log_raw "SETUP CONCLUÍDO em ${mins}m ${secs}s"
@@ -494,7 +572,7 @@ main() {
   echo "  ╚═════╝  ╚═════╝  ╚═════╝      ╚═══╝  ╚═╝  ╚═╝╚══════╝"
   echo -e "${NC}"
   echo -e "  ${BOLD}Doc-Validator — Full Stack Bootstrap${NC}"
-  echo -e "  Infra Base → Rails → Go Relay"
+  echo -e "  Infra Base → Rails → Go Relay → Observabilidade"
   echo -e "  ${GRAY}Log: $LOG_FILE${NC}\n"
 
   check_dependencies
@@ -502,7 +580,7 @@ main() {
   # ────────────────────────────────────────────
   # 0. GARANTIR .ENV EM TODOS OS PROJETOS
   # ────────────────────────────────────────────
-  log_section "0/3 · Verificando arquivos .env"
+  log_section "0/4 · Verificando arquivos .env"
   ensure_env "$SCRIPT_DIR/infra-doc-validator" "infra-doc-validator"
   ensure_env "$SCRIPT_DIR/rails-doc-validator" "rails-doc-validator"
   ensure_env "$SCRIPT_DIR/go-relay"            "go-relay"
@@ -514,9 +592,15 @@ main() {
   setup_certificates
 
   # ────────────────────────────────────────────
-  # 1. INFRAESTRUTURA BASE
+  # 0.6. GARANTIR REDE COMPARTILHADA
   # ────────────────────────────────────────────
-  log_section "1/3 · Infraestrutura Base (Postgres + RabbitMQ + MinIO)"
+  log_section "0.6 · Garantindo rede compartilhada"
+  ensure_network
+
+  # ────────────────────────────────────────────
+  # 1. INFRAESTRUTURA BASE (com Observabilidade)
+  # ────────────────────────────────────────────
+  log_section "1/4 · Infraestrutura Base (Postgres + RabbitMQ + MinIO + Observabilidade)"
 
   INFRA_FILE="$SCRIPT_DIR/infra-doc-validator/docker-compose.yml"
   log_debug "Compose file: $INFRA_FILE"
@@ -532,6 +616,16 @@ main() {
 
   log_step "Aguardando MinIO"
   wait_for_healthy "minio" "$INFRA_FILE"
+
+  # Aguardar serviços de observabilidade
+  log_step "Aguardando Loki (Observabilidade)"
+  wait_for_healthy "loki" "$INFRA_FILE" || log_warn "Loki não está healthy, continuando..."
+  
+  log_step "Aguardando Grafana"
+  wait_for_healthy "grafana" "$INFRA_FILE" || log_warn "Grafana não está healthy, continuando..."
+  
+  log_step "Verificando Promtail"
+  wait_for_running "promtail" "$INFRA_FILE" || log_warn "Promtail não está rodando, continuando..."
 
   log_step "Inicializando bucket no MinIO (minio-init)"
   docker compose -f "$INFRA_FILE" up minio-init 2>&1 | tee -a "$LOG_FILE" | tail -5
@@ -552,39 +646,27 @@ main() {
 
   # ────────────────────────────────────────────
   # 2. RAILS
-  #
-  # Ordem crítica para evitar conflito migrate x worker:
-  #   1. Sobe APENAS o `web` (worker fica parado)
-  #   2. Probe real via ActiveRecord — só avança quando Rails responde
-  #   3. db:migrate   ← sem worker competindo
-  #   4. db:seed
-  #   5. Sobe worker e nginx
   # ────────────────────────────────────────────
-  log_section "2/3 · Rails (API + Worker + Nginx)"
+  log_section "2/4 · Rails (API + Worker + Nginx)"
 
   RAILS_FILE="$SCRIPT_DIR/rails-doc-validator/docker-compose-rails-infra.yml"
   log_debug "Compose file: $RAILS_FILE"
 
-  # 1. Sobe o WEB primeiro (o entrypoint.sh dele faz o db:create e db:migrate)
   log_step "Subindo container 'web'"
   docker compose -f "$RAILS_FILE" up -d web 2>&1 | tee -a "$LOG_FILE"
 
-  # 2. Aguarda o probe do ActiveRecord (isso garante que as migrations do entrypoint acabaram)
   log_step "Aguardando inicialização do ambiente Rails (DB + Migrations)"
   wait_for_rails_ready "$RAILS_FILE"
 
-  # 3. Sobe o restante da estrutura
   log_step "Subindo Worker e Nginx"
   docker compose -f "$RAILS_FILE" up -d worker nginx 2>&1 | tee -a "$LOG_FILE"
 
-  # 4. Garante que o Worker está operacional antes de popular dados
   log_step "Validando estabilidade do Worker"
   wait_for_running "worker" "$RAILS_FILE"
 
   log_step "Aguardando Nginx (Proxy Reverso)"
   wait_for_healthy "nginx" "$RAILS_FILE"
 
-  # 5. Roda o Seed por último, com todo o ecossistema pronto
   log_step "Executando db:seed (População de dados)"
   if ! docker compose -f "$RAILS_FILE" exec -T web rails db:seed 2>&1 | tee -a "$LOG_FILE"; then
     log_warn "db:seed reportou algo inesperado. Verifique os logs se for a primeira subida."
@@ -593,10 +675,11 @@ main() {
   fi
 
   log_ok "Módulo Rails (Full Stack) operacional!"
+
   # ────────────────────────────────────────────
   # 3. GO RELAY
   # ────────────────────────────────────────────
-  log_section "3/3 · Go Relay"
+  log_section "3/4 · Go Relay"
 
   GO_FILE="$SCRIPT_DIR/go-relay/docker-compose-go-infra.yml"
   log_debug "Compose file: $GO_FILE"
@@ -608,6 +691,16 @@ main() {
   wait_for_running "relay" "$GO_FILE"
 
   log_ok "Go Relay pronto!"
+
+  # ────────────────────────────────────────────
+  # 4. VERIFICAÇÃO DE OBSERVABILIDADE
+  # ────────────────────────────────────────────
+  log_section "4/4 · Verificando Observabilidade"
+  
+  # Aguarda alguns segundos para os primeiros logs
+  sleep 5
+  
+  verify_observability
 
   # ────────────────────────────────────────────
   # FIM

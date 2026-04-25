@@ -1,0 +1,490 @@
+{
+  "title": "Go Relay — Outbox Monitor",
+  "uid": "go-relay-monitor",
+  "version": 1,
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "tags": ["relay", "outbox", "go", "rabbitmq"],
+  "panels": [
+
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Visão Geral",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 1,
+      "title": "✅ Publicados (5m)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 1, "w": 4, "h": 4 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`message published` [5m]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "colorMode": "background" }
+    },
+
+    {
+      "id": 2,
+      "title": "🔁 Agendados p/ Retry (5m)",
+      "type": "stat",
+      "gridPos": { "x": 4, "y": 1, "w": 4, "h": 4 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=`event scheduled for retry` [5m]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "yellow" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "yellow", "value": null }] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "colorMode": "background" }
+    },
+
+    {
+      "id": 3,
+      "title": "💀 Falhas Definitivas (5m)",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 1, "w": 4, "h": 4 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=`event exhausted all retries` [5m]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "colorMode": "background" }
+    },
+
+    {
+      "id": 4,
+      "title": "🧟 Reclaim Stale (5m)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 1, "w": 4, "h": 4 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`poller` | msg=`reclaimed stale processing events` [5m]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "colorMode": "background" }
+    },
+
+    {
+      "id": 5,
+      "title": "🚨 CRITICALs Ativos (5m)",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 1, "w": 4, "h": 4 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | msg=~`CRITICAL.*` [5m]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "dark-red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "colorMode": "background" }
+    },
+
+    {
+      "id": 6,
+      "title": "⚡ Latência P95 — publisher (5m)",
+      "type": "stat",
+      "gridPos": { "x": 20, "y": 1, "w": 4, "h": 4 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "quantile_over_time(0.95, {container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`message published` | unwrap duration_ms [1m])",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none", "colorMode": "background" }
+    },
+
+    {
+      "id": 200,
+      "type": "row",
+      "title": "Throughput & Erros",
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 10,
+      "title": "📊 Publicados vs Retries vs Falhas (por minuto)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 6, "w": 16, "h": 8 },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`message published` [1m]))",
+          "legendFormat": "Publicados"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=`event scheduled for retry` [1m]))",
+          "legendFormat": "Agendado retry"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=`event exhausted all retries` [1m]))",
+          "legendFormat": "Falha definitiva"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`poller` | msg=`reclaimed stale processing events` [1m]))",
+          "legendFormat": "Stale reclaimed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 15 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Publicados" },       "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Agendado retry" },   "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Falha definitiva" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Stale reclaimed" },  "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      }
+    },
+
+    {
+      "id": 11,
+      "title": "⚠️ Taxa de Erro % (5m)",
+      "type": "timeseries",
+      "gridPos": { "x": 16, "y": 6, "w": 8, "h": 8 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "( sum(count_over_time({container=~\"go-relay-relay.*\"} | json | level=`error` [5m])) / sum(count_over_time({container=~\"go-relay-relay.*\"} [5m])) ) * 100",
+        "legendFormat": "% erros"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 2, "fillOpacity": 20 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red",    "value": 10 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      }
+    },
+
+    {
+      "id": 300,
+      "type": "row",
+      "title": "Retry — Detalhamento",
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 20,
+      "title": "🔁 Retries por failure_reason",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 15, "w": 12, "h": 7 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum by (failure_reason) (count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=`event scheduled for retry` [1m]))",
+        "legendFormat": "{{failure_reason}}"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      }
+    },
+
+    {
+      "id": 21,
+      "title": "💀 Falhas Definitivas por failure_reason",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 15, "w": 12, "h": 7 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum by (failure_reason) (count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=`event exhausted all retries` [1m]))",
+        "legendFormat": "{{failure_reason}}"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        }
+      }
+    },
+
+    {
+      "id": 22,
+      "title": "📋 Últimos Eventos com Retry",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 7 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "{container=~\"go-relay-relay.*\"} | json | logger=`processor` | msg=~`event scheduled for retry|event exhausted all retries`",
+        "refId": "A"
+      }],
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+
+    {
+      "id": 400,
+      "type": "row",
+      "title": "Publisher — RabbitMQ",
+      "gridPos": { "x": 0, "y": 29, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 30,
+      "title": "📈 Latência Publisher — Histograma (1m)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "quantile_over_time(0.50, {container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`message published` | unwrap duration_ms [1m])",
+          "legendFormat": "P50"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "quantile_over_time(0.95, {container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`message published` | unwrap duration_ms [1m])",
+          "legendFormat": "P95"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "quantile_over_time(0.99, {container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`message published` | unwrap duration_ms [1m])",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2, "fillOpacity": 5 } }
+      }
+    },
+
+    {
+      "id": 31,
+      "title": "🔌 Erros de Conexão / Broker (1m)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`publish timeout` [1m]))",
+          "legendFormat": "Timeout broker"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`broker nacked message` [1m]))",
+          "legendFormat": "Broker NACK"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`publish failed` [1m]))",
+          "legendFormat": "Publish failed"
+        },
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({container=~\"go-relay-relay.*\"} | json | logger=`publisher` | msg=`rabbitmq connection lost` [1m]))",
+          "legendFormat": "Conexão perdida"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        }
+      }
+    },
+
+    {
+      "id": 500,
+      "type": "row",
+      "title": "Poller — Saúde",
+      "gridPos": { "x": 0, "y": 37, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 40,
+      "title": "📦 Tamanho médio do batch (1m)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 38, "w": 12, "h": 6 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "avg_over_time({container=~\"go-relay-relay.*\"} | json | logger=`poller` | msg=`claimed batch` | unwrap count [1m])",
+        "legendFormat": "Batch médio"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      }
+    },
+
+    {
+      "id": 41,
+      "title": "🧟 Stale reclaimed — quantidade (1m)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 38, "w": 12, "h": 6 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "sum_over_time({container=~\"go-relay-relay.*\"} | json | logger=`poller` | msg=`reclaimed stale processing events` | unwrap count [1m])",
+        "legendFormat": "Eventos reclaimed"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "color": { "mode": "fixed", "fixedColor": "orange" }
+        }
+      }
+    },
+
+    {
+      "id": 600,
+      "type": "row",
+      "title": "CRITICALs & Logs de Erro",
+      "gridPos": { "x": 0, "y": 44, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 50,
+      "title": "🚨 Logs CRITICAL",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 45, "w": 24, "h": 6 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "{container=~\"go-relay-relay.*\"} | json | msg=~`CRITICAL.*`",
+        "refId": "A"
+      }],
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+
+    {
+      "id": 51,
+      "title": "🔴 Todos os Erros (warn + error)",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 51, "w": 24, "h": 7 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "{container=~\"go-relay-relay.*\"} | json | level=~`warn|error`",
+        "refId": "A"
+      }],
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    },
+
+    {
+      "id": 700,
+      "type": "row",
+      "title": "Busca por Event ID",
+      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 1 },
+      "collapsed": false
+    },
+
+    {
+      "id": 60,
+      "title": "🎯 Rastrear Event ID",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 7 },
+      "targets": [{
+        "datasource": "Loki",
+        "expr": "{container=~\"go-relay-relay.*\"} | json | event_id != ``",
+        "refId": "A"
+      }],
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    }
+
+  ]
+}

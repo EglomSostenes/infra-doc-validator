@@ -18,34 +18,30 @@ services:
       retries: 5
     networks:
       - infra-net
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:3-management
     hostname: rabbit-doc-validator-server
-
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
-
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./rabbitmq/init.sh:/init.sh:ro
       - ./definitions.json:/etc/rabbitmq/definitions.json:ro
-
     entrypoint: ["/init.sh"]
-
     ports:
       - "5672:5672"
       - "15672:15672"
-
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-
     networks:
       - infra-net
+    restart: unless-stopped
 
   minio:
     image: minio/minio
@@ -65,6 +61,7 @@ services:
       retries: 5
     networks:
       - infra-net
+    restart: unless-stopped
 
   minio-init:
     image: minio/mc
@@ -85,14 +82,68 @@ services:
     networks:
       - infra-net
 
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+    networks:
+      - infra-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: promtail
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yaml
+    networks:
+      - infra-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-DocValidator2024!}
+      - GF_AUTH_BASIC_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    ports:
+      - "3030:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - infra-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   postgres_data:
   rabbitmq_data:
   minio_data:
+  loki_data:
+  grafana_data:
 
 networks:
   infra-net:
+    external: true
     name: local-infra-net
-    driver: bridge
-    attachable: true
-
